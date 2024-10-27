@@ -8,37 +8,44 @@ import json
 
 def parse_args() -> Namespace:
   parser = ArgumentParser()
-  parser.add_argument("--input_path", type=str, required=True)
-  parser.add_argument("--output_path", type=str, required=True)
+  parser.add_argument("input_path", type=str)
+  parser.add_argument("label2idx_path", type=str)
+  parser.add_argument(
+      "--output",
+      dest="output_path",
+      type=str,
+      default="annotations/output.json")
   parser.add_argument("--n_samples", type=int, required=True)
-  parser.add_argument("--dataset_classes", type=int, default=400)
+  parser.add_argument("--dataset_classes", type=int, default=174)
   parser.add_argument("--seed", type=int, default=123)
   return parser.parse_args()
 
 
 def main(args: Namespace) -> None:
   np.random.seed(int(args.seed))
+  with open(args.label2idx_path, "r") as f:
+    label2idx = json.load(f)
   with open(args.input_path, "r") as f:
-    df = json.load(f)
-  classes = dict()
-  for index, row in df.iterrows():
-    cla: List = classes.get(row.label, [])
-    cla.append(index)
-    classes[row.label] = cla
+    samples = json.load(f)
+  classes = [[] for _ in range(int(args.dataset_classes))]
+  for idx, sample in enumerate(samples):
+    template: str = sample["template"]
+    template = template.replace("[", "").replace("]", "")
+    classes[int(label2idx[template])].append(idx)
 
   n_samples = int(args.n_samples)
-  sample_per_cls = math.floor(int(args.n_samples) / len(classes))
+  sample_per_cls = math.floor(int(args.n_samples) / len(label2idx))
   collected_idx = []
 
   if sample_per_cls > 0:
-    for key, value in classes.items():
-      if len(value) > sample_per_cls:
-        indexes = np.random.choice(len(value), sample_per_cls, replace=False)
-        collected_idx.extend([value[i] for i in indexes])
+    for s in classes:
+      if len(s) > sample_per_cls:
+        indexes = np.random.choice(len(s), sample_per_cls, replace=False)
+        collected_idx.extend([s[i] for i in indexes])
         n_samples -= sample_per_cls
       else:
-        collected_idx.extend(value)
-        n_samples -= len(value)
+        collected_idx.extend(s)
+        n_samples -= len(s)
 
   if n_samples > 0:
     assert n_samples < args.dataset_classes
@@ -46,12 +53,13 @@ def main(args: Namespace) -> None:
         int(args.dataset_classes),
         n_samples,
         replace=False)
-    class_list = list(classes.keys())
     for index in indexes:
-      collected_idx.append(classes[class_list[index]][0])
+      collected_idx.append(classes[index][0])
 
-  df_subset = df.iloc[collected_idx]
-  df_subset.to_csv(args.output_path, index=False, quoting=csv.QUOTE_NONNUMERIC)
+  collected = []
+  for idx in collected_idx:
+    collected.append(samples[idx])
+  json.dump(collected, open(args.output_path, "w"))
 
 
 if __name__ == "__main__":
